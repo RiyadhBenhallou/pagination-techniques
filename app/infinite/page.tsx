@@ -1,28 +1,37 @@
+"use client";
 import { user } from "@/db/schema";
-import { db } from "../db";
-import { revalidatePath } from "next/cache";
-import PaginationControl from "@/components/pagination-control";
-import { redirect } from "next/navigation";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { like } from "drizzle-orm";
+import { redirect } from "next/navigation";
+import { fetchUsers } from "./actions";
+import { useInView } from "react-intersection-observer";
+import { useEffect } from "react";
+import { Loader2 } from "lucide-react";
 
-export default async function Home({ searchParams: { page, query } }: any) {
-  const where = query && like(user.name, `%${query}%`);
-  const users = await db.query.user.findMany({
-    where,
-    limit: 10,
-    offset: (page - 1) * 10,
+export default function Home({ searchParams: { query } }: any) {
+  const { data, fetchNextPage, isFetchingNextPage } = useInfiniteQuery({
+    queryKey: ["users"],
+    queryFn: async ({ pageParam }) => await fetchUsers({ pageParam }, query),
+    getNextPageParam: (lastPage) => lastPage.nextCursor,
   });
+
+  const [ref, inView] = useInView();
+
+  useEffect(() => {
+    if (inView) {
+      fetchNextPage();
+    }
+  }, [inView]);
 
   return (
     <main className="flex min-h-screen flex-col gap-4 p-24">
       <div>
         <form
           className="flex gap-2"
-          action={async (formData: FormData) => {
-            "use server";
+          action={(formData: FormData) => {
             const name = formData.get("name") as string;
 
-            redirect(`/?${name ? `query=${name}` : ""}`);
+            redirect(`/infinite${name ? `?query=${name}` : ""}`);
           }}
         >
           <input
@@ -40,22 +49,22 @@ export default async function Home({ searchParams: { page, query } }: any) {
           </button>
         </form>
         <h1 className="text-2xl">Current Users:</h1>
-        {users.map((user) => {
+        {data?.pages.map((page, i) => {
           return (
-            <p key={user.id}>
-              {user.id} {user.name}
-            </p>
+            <div key={i}>
+              {page?.data?.map((user) => {
+                return (
+                  <div key={user.id} className="p-2 border">
+                    {user.name}
+                  </div>
+                );
+              })}
+            </div>
           );
         })}
-
-        {users.length === 0 && <p>No users</p>}
       </div>
-      <PaginationControl
-        current={page ?? 1}
-        hasNextPage={users.length === 10}
-      />
-      <div>
-        <h1 className="text-2xl mb-2">Add User</h1>
+      <div ref={ref}>
+        {isFetchingNextPage && <Loader2 className="animate-spin" />}
         {/* <form
           className="flex gap-2"
           action={async (formData: FormData) => {
